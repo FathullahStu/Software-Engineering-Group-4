@@ -25,7 +25,7 @@ This project uses a flat-file modular structure.
 | :--- | :--- |
 | `app.py` | **Main Application.** Run this file to start the system. |
 | `auth.py` | Handles User Login and Registration logic. |
-| `db_manager.py` | Manages the SQLite database (`waste.db`). |
+| `db_manager.py` | Manages the SQLite database (`ecosort.db`). |
 | `resident_page.py` | UI for Residents (Bookings & Points). |
 | `collector_page.py` | UI for Drivers (Job completion). |
 | `admin_page.py` | UI for Admins (Dashboard & Stats). |
