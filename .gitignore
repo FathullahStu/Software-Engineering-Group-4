@@ -1,3 +1,5 @@
-waste.db
 __pycache__/
+.env
+.venv
+*.db  
 ngrok.exe
