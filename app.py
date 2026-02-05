@@ -1,6 +1,6 @@
 # FILE: app.py
 # Written by: Group 4 (Integration & UI/UX)
-# Purpose: Main Entry Point with "Pro" Styling and Role-Based HUD.
+# Purpose: Main Entry Point with Dark Maroon Styling.
 
 import streamlit as st
 import db_manager as db
@@ -8,7 +8,6 @@ import os
 import time
 
 # IMPORT UI MODULES
-# These link to the files you just updated
 import login_page
 import resident_page
 import collector_page
@@ -19,38 +18,48 @@ import admin_page
 # ==========================================
 st.set_page_config(
     page_title="EcoSort - Smart Waste Management",
-    page_icon="assets/logo.png", # Make sure this file exists!
+    page_icon="assets/logo.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# 2. GLOBAL STYLING (The "Pro" Look)
+# 2. GLOBAL STYLING (Maroon Theme)
 # ==========================================
 def load_custom_css():
     """
-    Injects CSS to remove the 'Streamlit' branding and round the buttons.
+    Injects CSS to style the app with a Dark Maroon sidebar.
     """
     st.markdown("""
         <style>
         /* 1. HIDE STREAMLIT BRANDING */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
+        #MainMenu {visibility: hidden;} /* Hides the 3-dot menu */
+        footer {visibility: hidden;}    /* Hides 'Made with Streamlit' */
+        /* header {visibility: hidden;}  <-- REMOVED: This was hiding the sidebar toggle! */
         
-        /* 2. ROUNDED BUTTONS (Modern Look) */
+        /* Optional: Make the header transparent so it looks cleaner */
+        [data-testid="stHeader"] {
+            background-color: rgba(0,0,0,0);
+        }
+        
+        /* 2. ROUNDED BUTTONS */
         .stButton button {
             border-radius: 20px;
             font-weight: 600;
         }
         
-        /* 3. SIDEBAR STYLING */
+        /* 3. SIDEBAR STYLING (Dark Maroon) */
         [data-testid="stSidebar"] {
-            background-color: #f8f9fa;
-            border-right: 1px solid #dee2e6;
+            background-color: #4a0404; /* Deep Maroon */
+            border-right: 1px solid #750000;
         }
         
-        /* 4. METRIC CARDS BORDER */
+        /* 4. FORCE WHITE TEXT IN SIDEBAR */
+        [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div, [data-testid="stSidebar"] label {
+            color: #ffffff !important;
+        }
+        
+        /* 5. METRIC CARDS BORDER */
         [data-testid="stMetricValue"] {
             font-size: 24px;
         }
@@ -61,10 +70,10 @@ def load_custom_css():
 # 3. SYSTEM INITIALIZATION
 # ==========================================
 def init_system():
-    # Create tables and Seed Data (Afiq, Min, etc.)
+    # Create tables and Seed Data
     db.create_tables()
     
-    # Initialize Session State Variables
+    # Initialize Session State
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'username' not in st.session_state:
@@ -87,7 +96,8 @@ def show_sidebar():
         if os.path.exists("assets/logo.png"):
             st.image("assets/logo.png", use_container_width=True)
         else:
-            st.header("♻️ EcoSort")
+            # White text for the header to match maroon theme
+            st.markdown("<h1 style='color: white;'>♻️ EcoSort</h1>", unsafe_allow_html=True)
         
         st.divider()
 
@@ -109,7 +119,7 @@ def show_sidebar():
                 points = db.get_user_points(user)
                 st.markdown("### 🌱 Eco-Wallet")
                 st.metric("Balance", f"{points} pts")
-                st.success("Level 2 Status") # Fake badge
+                st.success("Level 2 Status") 
                 
                 st.info("💡 **Daily Tip:**\nRinse plastic bottles to prevent contamination!")
             
@@ -138,7 +148,6 @@ def show_sidebar():
             
             # C. LOGOUT BUTTON
             if st.button("🚪 Logout", type="secondary", use_container_width=True):
-                # Clear Session
                 st.session_state['logged_in'] = False
                 st.session_state['username'] = None
                 st.session_state['role'] = None
