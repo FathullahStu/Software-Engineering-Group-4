@@ -1,265 +1,402 @@
 # FILE: db_manager.py
-# Written by: Group 4 (Backend)
-# Purpose: Handles all database interactions (Users, Bookings, Points, Rewards).
+# Written by: Group 4 (Full Backend Integration)
+# Purpose: Handles Database, Schema, Auth, and Business Logic for Gaps 1-5.
 
 import sqlite3
+import hashlib
 import pandas as pd
+import random
+from datetime import datetime
 
 DB_NAME = "ecosort.db"
 
-# =========================================================
-# 1. SETUP & SEEDING (The Foundation)
-# =========================================================
-
+# ==========================================
+# 1. DATABASE CONNECTION & SETUP
+# ==========================================
 def create_connection():
-    """Creates and returns a connection to the database."""
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    """Establishes a connection to the SQLite database."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # Allows accessing columns by name
+    except sqlite3.Error as e:
+        print(f"Error connecting to DB: {e}")
     return conn
 
 def create_tables():
     """
-    Creates the necessary tables if they don't exist.
-    Also calls seed_data() to populate test accounts.
+    Creates the 5 Normalized Tables as per Documentation.
     """
     conn = create_connection()
     c = conn.cursor()
-    
-    # 1. USERS TABLE
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT,
-            role TEXT,
-            points INTEGER DEFAULT 0
-        )
-    ''')
-    
-    # 2. BOOKINGS TABLE (Waste Collection Requests)
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS bookings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            resident_username TEXT,
-            date TEXT,
-            waste_type TEXT,
-            status TEXT DEFAULT 'Pending',
-            weight_kg REAL DEFAULT 0.0,
-            driver_notes TEXT DEFAULT ''
-        )
-    ''')
-    
-    # 3. REWARDS TABLE (Shop Items)
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS rewards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_name TEXT,
-            cost INTEGER
-        )
-    ''')
-    
+
+    # TABLE 1: USERS (Authentication & Role Base)
+    # Includes 'assigned_zone' for Collectors (Gap 3)
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        assigned_zone TEXT,  
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # TABLE 2: RESIDENT PROFILES (Specific to Residents)
+    # Includes Address and Zone (Gap 4)
+    c.execute('''CREATE TABLE IF NOT EXISTS resident_profiles (
+        user_id INTEGER PRIMARY KEY,
+        full_name TEXT,
+        address TEXT NOT NULL,
+        zone TEXT NOT NULL,
+        current_points INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )''')
+
+    # TABLE 3: PICKUP REQUESTS (Transactions)
+    c.execute('''CREATE TABLE IF NOT EXISTS pickup_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id INTEGER NOT NULL,
+        waste_type TEXT NOT NULL,
+        status TEXT DEFAULT 'Pending',
+        scheduled_date TEXT NOT NULL,
+        weight_kg REAL DEFAULT 0.0,
+        driver_id INTEGER,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (resident_id) REFERENCES users (id),
+        FOREIGN KEY (driver_id) REFERENCES users (id)
+    )''')
+
+    # TABLE 4: REWARDS CATALOG (Inventory)
+    c.execute('''CREATE TABLE IF NOT EXISTS rewards_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_name TEXT NOT NULL,
+        cost_points INTEGER NOT NULL,
+        stock_level INTEGER DEFAULT 50,
+        description TEXT
+    )''')
+
+    # TABLE 5: REDEMPTION LOGS (Audit Trail)
+    c.execute('''CREATE TABLE IF NOT EXISTS redemption_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resident_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        points_spent INTEGER NOT NULL,
+        redeemed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (resident_id) REFERENCES users (id),
+        FOREIGN KEY (item_id) REFERENCES rewards_catalog (id)
+    )''')
+
     conn.commit()
     
-    # Check if rewards exist, if not, add defaults
-    c.execute('SELECT count(*) FROM rewards')
+    # Check if we need to seed data (if users table is empty)
+    c.execute("SELECT count(*) FROM users")
     if c.fetchone()[0] == 0:
-        default_rewards = [
-            ('Tesco RM10 Voucher', 500),
-            ('GrabFood RM5 Discount', 250),
-            ('Metal Straw Set', 100),
-            ('EcoSort T-Shirt', 1000),
-            ('Netflix 1-Month Sub', 1500)
-        ]
-        c.executemany('INSERT INTO rewards (item_name, cost) VALUES (?, ?)', default_rewards)
-        conn.commit()
-        print("✅ Default rewards added.")
-
+        seed_data(conn)
+        
     conn.close()
-    
-    # TRIGGER SEED DATA
-    seed_data()
 
-def seed_data():
-    """
-    Automatically registers the Group 4 members and test users
-    so you don't have to sign up manually.
-    """
-    # Format: (username, password, role)
-    # NOTE: Password is set to '123' for everyone for easy testing.
-    test_users = [
-        ("afiq",   "123", "Admin"),
-        ("min",    "123", "Admin"),
-        ("fathul", "123", "Collector"),
-        ("amir",   "123", "Collector"),
-        ("john",   "123", "Resident")
+# ==========================================
+# 2. DATA SEEDING
+# ==========================================
+def seed_data(conn):
+    """Populates the DB with initial consistent data."""
+    c = conn.cursor()
+    print("Seeding Normalized Database...")
+
+    def hash_pw(password):
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    # 1. USERS
+    users = [
+        # Username, Password, Role, Assigned_Zone
+        ("john", hash_pw("123"), "Resident", None),
+        ("sarah", hash_pw("123"), "Resident", None),
+        ("ali", hash_pw("123"), "Resident", None),
+        ("fathul", hash_pw("123"), "Collector", "Zone A"), # Gap 3
+        ("amir", hash_pw("123"), "Collector", "Zone B"),   # Gap 3
+        ("afiq", hash_pw("123"), "Admin", None),
+        ("min", hash_pw("123"), "Admin", None)
     ]
+    c.executemany("INSERT INTO users (username, password, role, assigned_zone) VALUES (?, ?, ?, ?)", users)
+
+    # 2. RESIDENT PROFILES (Gap 4: Real Addresses)
+    c.execute("SELECT id, username FROM users WHERE role='Resident'")
+    residents = c.fetchall()
     
-    conn = create_connection()
-    c = conn.cursor()
-    
-    for user, pwd, role in test_users:
-        try:
-            # Try to insert. If username exists, it will fail silently (which is good).
-            c.execute('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', (user, pwd, role))
-            print(f"✅ Created Seed Account: {user} ({role})")
-        except sqlite3.IntegrityError:
-            pass # User already exists, skip
-            
+    profiles_map = {
+        "john": ("John Doe", "12 Jalan Teknokrat 3, Cyberjaya", "Zone A"),
+        "sarah": ("Sarah Tan", "45 Persiaran Multimedia, Cyberjaya", "Zone B"),
+        "ali": ("Ali bin Abu", "88 Lingkaran Cyber Point, Cyberjaya", "Zone A")
+    }
+
+    for res in residents:
+        if res['username'] in profiles_map:
+            name, addr, zone = profiles_map[res['username']]
+            c.execute("INSERT INTO resident_profiles (user_id, full_name, address, zone, current_points) VALUES (?, ?, ?, ?, ?)", 
+                      (res['id'], name, addr, zone, 50))
+
+    # 3. REWARDS
+    rewards = [
+        ("GrabFood RM10 Voucher", 500, 50),
+        ("TGV Cinema Ticket", 800, 30),
+        ("Stainless Steel Straw Set", 200, 100),
+        ("EcoSort T-Shirt", 1500, 20),
+        ("Netflix 1-Month Sub", 1200, 15)
+    ]
+    c.executemany("INSERT INTO rewards_catalog (item_name, cost_points, stock_level) VALUES (?, ?, ?)", rewards)
+
     conn.commit()
-    conn.close()
+    print("Database seeding complete.")
 
-# =========================================================
-# 2. AUTHENTICATION (Login & Sign Up)
-# =========================================================
-
-def login_check(username, password):
-    """
-    Verifies credentials. Returns the ROLE if successful, else None.
-    """
+# ==========================================
+# 3. AUTHENTICATION FUNCTIONS
+# ==========================================
+def login_user(username, password):
     conn = create_connection()
     c = conn.cursor()
-    c.execute('SELECT role FROM users WHERE username = ? AND password = ?', (username, password))
-    result = c.fetchone()
-    conn.close()
+    hashed = hashlib.sha256(password.encode()).hexdigest()
     
-    if result:
-        return result[0]  # Return the role (e.g., "Resident")
-    return None
+    c.execute("SELECT id, username, role, assigned_zone FROM users WHERE username=? AND password=?", (username, hashed))
+    user = c.fetchone()
+    conn.close()
+    return user
 
-def add_user(username, password, role):
-    """
-    Registers a new user. Returns True if successful, False if username taken.
-    """
+def register_user(username, password, role="Resident", address="Cyberjaya", zone="Zone A"):
     conn = create_connection()
     c = conn.cursor()
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    
     try:
-        c.execute('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', (username, password, role))
+        # Add to Users
+        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (username, hashed, role))
+        user_id = c.lastrowid
+        
+        # Add to Profiles if Resident
+        if role == "Resident":
+            c.execute("INSERT INTO resident_profiles (user_id, address, zone) VALUES (?, ?, ?)", 
+                      (user_id, address, zone))
+        
         conn.commit()
-        conn.close()
         return True
     except sqlite3.IntegrityError:
-        conn.close()
         return False
+    finally:
+        conn.close()
 
-# =========================================================
-# 3. RESIDENT FUNCTIONS
-# =========================================================
-
-def add_booking(username, date, waste_type):
-    """Adds a new waste collection request."""
+# ==========================================
+# 4. RESIDENT FUNCTIONS (Gaps 1, 2, 5)
+# ==========================================
+def get_user_points(username):
     conn = create_connection()
     c = conn.cursor()
-    c.execute('''
-        INSERT INTO bookings (resident_username, date, waste_type, status)
-        VALUES (?, ?, ?, 'Pending')
-    ''', (username, date, waste_type))
-    conn.commit()
+    query = """
+    SELECT p.current_points 
+    FROM resident_profiles p
+    JOIN users u ON u.id = p.user_id
+    WHERE u.username = ?
+    """
+    c.execute(query, (username,))
+    result = c.fetchone()
+    conn.close()
+    return result['current_points'] if result else 0
+
+def add_booking(username, date, waste_type, notes=""):
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username=?", (username,))
+    user = c.fetchone()
+    if user:
+        c.execute("""
+            INSERT INTO pickup_requests (resident_id, scheduled_date, waste_type, notes, status) 
+            VALUES (?, ?, ?, ?, 'Pending')
+        """, (user['id'], date, waste_type, notes))
+        conn.commit()
     conn.close()
 
 def get_resident_history(username):
-    """Returns a DataFrame of the user's past bookings."""
     conn = create_connection()
-    query = "SELECT * FROM bookings WHERE resident_username = ? ORDER BY id DESC"
+    query = """
+    SELECT r.scheduled_date as date, r.waste_type, r.status, r.weight_kg 
+    FROM pickup_requests r
+    JOIN users u ON u.id = r.resident_id
+    WHERE u.username = ?
+    ORDER BY r.scheduled_date DESC
+    """
     df = pd.read_sql_query(query, conn, params=(username,))
     conn.close()
     return df
 
-def get_user_points(username):
-    """Returns the current point balance for a user."""
+# --- GAP 5: PROFILE MANAGEMENT ---
+def get_resident_details(username):
+    """Fetches profile details for editing."""
     conn = create_connection()
     c = conn.cursor()
-    c.execute('SELECT points FROM users WHERE username = ?', (username,))
+    query = """
+    SELECT p.full_name, p.address, p.zone
+    FROM resident_profiles p
+    JOIN users u ON u.id = p.user_id
+    WHERE u.username = ?
+    """
+    c.execute(query, (username,))
     result = c.fetchone()
     conn.close()
-    return result[0] if result else 0
+    return result
 
-def get_rewards_list():
-    """Returns a DataFrame of all available rewards."""
+def update_resident_profile(username, full_name, address):
+    """Updates Resident's personal info."""
     conn = create_connection()
-    df = pd.read_sql_query("SELECT * FROM rewards", conn)
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username=?", (username,))
+    user = c.fetchone()
+    if user:
+        try:
+            c.execute("UPDATE resident_profiles SET full_name=?, address=? WHERE user_id=?", 
+                     (full_name, address, user['id']))
+            conn.commit()
+            return True
+        except:
+            return False
     conn.close()
-    return df
+    return False
 
-def redeem_item(username, item_name, cost):
-    """
-    Deducts points and returns a success message/voucher code.
-    """
-    current_pts = get_user_points(username)
-    
-    if current_pts >= cost:
-        conn = create_connection()
-        c = conn.cursor()
-        # Deduct points
-        c.execute('UPDATE users SET points = points - ? WHERE username = ?', (cost, username))
-        conn.commit()
-        conn.close()
-        
-        # Generate a fake voucher code
-        import random
-        code = f"ECO-{random.randint(1000,9999)}"
-        return True, code
-    else:
-        return False, "Not enough points!"
-
-# =========================================================
-# 4. COLLECTOR FUNCTIONS
-# =========================================================
-
-def get_pending_jobs():
-    """Returns all bookings with status 'Pending'."""
+def update_password(username, new_password):
+    """Updates User's password."""
     conn = create_connection()
-    df = pd.read_sql_query("SELECT * FROM bookings WHERE status = 'Pending'", conn)
+    c = conn.cursor()
+    hashed = hashlib.sha256(new_password.encode()).hexdigest()
+    try:
+        c.execute("UPDATE users SET password=? WHERE username=?", (hashed, username))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+# ==========================================
+# 5. COLLECTOR FUNCTIONS (Gap 4)
+# ==========================================
+def get_pending_jobs(driver_zone=None):
+    conn = create_connection()
+    # Query fetches REAL Address and Zone from Profiles for Gap 4
+    query = """
+    SELECT 
+        r.id, 
+        u.username as resident_username, 
+        p.address, 
+        p.zone,
+        r.waste_type, 
+        r.scheduled_date as date, 
+        r.notes as driver_notes
+    FROM pickup_requests r
+    JOIN users u ON u.id = r.resident_id
+    JOIN resident_profiles p ON p.user_id = u.id
+    WHERE r.status = 'Pending'
+    """
+    if driver_zone:
+        query += f" AND p.zone = '{driver_zone}'"
+    
+    df = pd.read_sql_query(query, conn)
     conn.close()
     return df
 
 def complete_job(job_id, weight):
-    """
-    Marks a job as Completed, records weight, and awards points to the Resident.
-    Formula: 1 kg = 10 Points.
-    """
-    points_to_add = int(weight * 10)
-    
     conn = create_connection()
     c = conn.cursor()
     
-    # 1. Get the resident name from the booking
-    c.execute('SELECT resident_username FROM bookings WHERE id = ?', (job_id,))
-    res = c.fetchone()
+    # Update Booking
+    c.execute("UPDATE pickup_requests SET status='Completed', weight_kg=? WHERE id=?", (weight, job_id))
     
-    if res:
-        resident_name = res[0]
-        
-        # 2. Update Booking Status
-        c.execute('''
-            UPDATE bookings 
-            SET status = 'Completed', weight_kg = ? 
-            WHERE id = ?
-        ''', (weight, job_id))
-        
-        # 3. Give Points to Resident
-        c.execute('''
-            UPDATE users 
-            SET points = points + ? 
-            WHERE username = ?
-        ''', (points_to_add, resident_name))
-        
-        conn.commit()
+    # Award Points (1kg = 10 pts)
+    c.execute("SELECT resident_id FROM pickup_requests WHERE id=?", (job_id,))
+    res_id = c.fetchone()['resident_id']
+    points = int(weight * 10)
+    c.execute("UPDATE resident_profiles SET current_points = current_points + ? WHERE user_id=?", (points, res_id))
     
+    conn.commit()
     conn.close()
 
-# =========================================================
-# 5. ADMIN FUNCTIONS
-# =========================================================
-
-def get_all_users():
-    """Returns all registered users."""
+def report_issue(job_id, reason):
+    """Use Case 9"""
     conn = create_connection()
-    df = pd.read_sql_query("SELECT id, username, role, points FROM users", conn)
+    c = conn.cursor()
+    c.execute("UPDATE pickup_requests SET status='Failed', notes=? WHERE id=?", (f"Issue: {reason}", job_id))
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# 6. ADMIN FUNCTIONS (Gap 3)
+# ==========================================
+def get_all_users():
+    conn = create_connection()
+    query = """
+    SELECT u.id, u.username, u.role, u.assigned_zone, p.current_points, p.zone as resident_zone
+    FROM users u
+    LEFT JOIN resident_profiles p ON u.id = p.user_id
+    """
+    df = pd.read_sql_query(query, conn)
     conn.close()
     return df
+
+def update_employee_zone(username, new_zone):
+    """Gap 3: Assign Collector to Zone."""
+    conn = create_connection()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE users SET assigned_zone=? WHERE username=? AND role='Collector'", (new_zone, username))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
 
 def get_all_bookings_admin():
-    """Returns ALL bookings (history + pending) for analytics."""
     conn = create_connection()
-    df = pd.read_sql_query("SELECT * FROM bookings", conn)
+    query = """
+    SELECT r.id, r.scheduled_date as date, u.username as resident_username, r.waste_type, r.status, r.weight_kg 
+    FROM pickup_requests r
+    JOIN users u ON u.id = r.resident_id
+    ORDER BY r.scheduled_date DESC
+    """
+    df = pd.read_sql_query(query, conn)
     conn.close()
     return df
+
+# ==========================================
+# 7. REWARDS FUNCTIONS
+# ==========================================
+def get_rewards_list():
+    conn = create_connection()
+    df = pd.read_sql_query("SELECT * FROM rewards_catalog WHERE stock_level > 0", conn)
+    conn.close()
+    return df
+
+def redeem_item(username, item_name, cost):
+    conn = create_connection()
+    c = conn.cursor()
+    
+    # User Check
+    c.execute("SELECT u.id, p.current_points FROM users u JOIN resident_profiles p ON u.id = p.user_id WHERE u.username=?", (username,))
+    user = c.fetchone()
+    if not user: return False, "User not found"
+    
+    # Item Check
+    c.execute("SELECT id, stock_level FROM rewards_catalog WHERE item_name=?", (item_name,))
+    item = c.fetchone()
+    if not item or item['stock_level'] < 1: return False, "Out of stock"
+    if user['current_points'] < cost: return False, "Insufficient points"
+    
+    # Transaction
+    try:
+        c.execute("UPDATE resident_profiles SET current_points = current_points - ? WHERE user_id=?", (cost, user['id']))
+        c.execute("UPDATE rewards_catalog SET stock_level = stock_level - 1 WHERE id=?", (item['id'],))
+        c.execute("INSERT INTO redemption_logs (resident_id, item_id, points_spent) VALUES (?, ?, ?)", 
+                  (user['id'], item['id'], cost))
+        conn.commit()
+        return True, f"CODE-{random.randint(100,999)}"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        conn.close()
