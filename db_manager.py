@@ -8,7 +8,7 @@ import pandas as pd
 import random
 from datetime import datetime
 
-DB_NAME = "ecosort.db"
+DB_NAME = "waste.db"
 
 # ==========================================
 # 1. DATABASE CONNECTION & SETUP
